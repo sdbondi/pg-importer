@@ -1,0 +1,8 @@
+[package]
+name = "pg_importer"
+version = "0.1.0"
+authors = ["Stanimal <sdbondi@users.noreply.github.com>"]
+edition = "2018"
+
+[dependencies]
+clap = "2.31.2"
