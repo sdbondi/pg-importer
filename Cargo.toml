@@ -1,8 +1,10 @@
 [package]
-name = "pg_importer"
+name = "pg-importer"
 version = "0.1.0"
 authors = ["Stanimal <sdbondi@users.noreply.github.com>"]
 edition = "2018"
 
 [dependencies]
 clap = "2.31.2"
+derive-error = "0.0.4"
+log = "0.4"

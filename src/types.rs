@@ -1,6 +1,7 @@
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum AppError {
-    DumpFileNotFound,
+    /// Unable to open dump file
+    CannotOpenDumpFile,
 }
 
 pub type HandlerResult = Result<(), AppError>;

@@ -3,8 +3,8 @@ use std::process;
 
 use clap::{App, Arg, SubCommand};
 
+use crate::commands;
 use crate::types::HandlerResult;
-use crate::import;
 
 pub fn run_cli() {
     let matches = App::new("DB importer")
@@ -21,17 +21,23 @@ pub fn run_cli() {
                 )
                 .arg(
                     Arg::with_name("dump-file")
-                        .long("dump-file")
                         .short("f")
                         .takes_value(true)
                         .required(true)
                         .help("SQL DB dump file"),
+                )
+                .arg(
+                    Arg::with_name("out-file")
+                        .short("o")
+                        .takes_value(true)
+                        .required(false)
+                        .help("Output dump file"),
                 ),
         )
         .get_matches();
 
     let result: HandlerResult = match matches.subcommand() {
-        ("import", Some(matches)) => import::handler(matches),
+        ("import", Some(matches)) => commands::import::handler(matches),
         ("", _) => {
             eprintln!("Missing subcommand");
             process::exit(1);
