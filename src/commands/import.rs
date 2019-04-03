@@ -2,12 +2,15 @@ use std::{
     fs::{self, File},
     io::{self, BufRead},
     path::Path,
+    str::FromStr,
+    io::Seek,
 };
 
 use clap::ArgMatches;
 
 use crate::types::{AppError, HandlerResult};
 use std::collections::HashMap;
+use crate::commands::import::LineType::Comment;
 
 pub fn handler(matches: &ArgMatches) -> HandlerResult {
     let connection_string = matches.value_of("connection").unwrap();
@@ -17,6 +20,8 @@ pub fn handler(matches: &ArgMatches) -> HandlerResult {
     let file = File::open(Path::new(dump_file)).map_err(|_| AppError::CannotOpenDumpFile)?;
 
     let statements = DumpReader::from_file(&file).read();
+
+    println!("{:#?}", statements);
 
     //    DumpWriter::from_sections(sections).write_to_file()
 
@@ -39,51 +44,148 @@ impl<'a> DumpReader<'a> {
         Self { buf_reader: io::BufReader::new(file) }
     }
 
-    pub fn read(&mut self) -> io::Result<Vec<Statements>> {
+    pub fn read(&mut self) -> io::Result<Vec<Statement>> {
         let mut statements = Vec::new();
+        let mut last_toc_comment = None;
+        let mut blank_count = 0;
         loop {
-            if self.read_until_comment().is_none() {
+            if let Ok(line) = self.next_line_type() {
+                if last_toc_comment.is_some() {
+                    let mut statement = self.read_statement()?;
+
+                    statement.set_toc_from_comment(last_toc_comment.unwrap());
+                    println!("statement {:#?}", statement);
+                    statements.push(statement.clone());
+                    last_toc_comment = None;
+                    continue;
+                }
+
+                match line {
+                    LineType::Blank => {
+                        blank_count += 1;
+                        if blank_count > 10 {
+                            break Ok(statements);
+                        }
+                        let mut dummy_buf = String::new();
+                        self.buf_reader.read_line(&mut dummy_buf);
+                        continue
+                    },
+                    LineType::Comment => {
+                        blank_count = 0;
+                        match self.read_comment_block() {
+                            Ok(c) => {
+                                if c.is_toc() {
+                                    last_toc_comment = Some(c.clone());
+                                } else {
+                                    last_toc_comment = None;
+                                }
+
+                                println!("comment {:#?}", c);
+                            }
+                            Err(e) => {
+                                if e.kind() == io::ErrorKind::UnexpectedEof {
+                                    break Ok(statements);
+                                } else {
+                                    break Err(e);
+                                }
+                            }
+                        }
+                    }
+                    LineType::Statement => {
+                        blank_count = 0;
+                        let statement = self.read_statement()?;
+                        println!("statement {:#?}", statement);
+                        statements.push(statement.clone());
+                        last_toc_comment = None;
+                    }
+                }
+            } else {
                 break Ok(statements);
             }
-
-            let comment = self.read_comment_block();
-            if comment.is_none() {
-                continue;
-            }
-
-            println!("comment block = {:?}", comment);
-            return Ok(statements);
-
-            let mut buf = String::new();
-            let len = self.buf_reader.read_line(&mut buf)?;
-
-            if len > 0 {
-                println!("{}", buf);
-            }
-            break Ok(statements);
         }
     }
 
-    fn read_comment_block(&mut self) -> Option<CommentBlock> {
+    fn read_statement(&mut self) -> io::Result<Statement> {
+        let mut buf = String::new();
+        let mut statements = Vec::new();
+        let mut empty_line_count = 0;
+        let mut loop_count = 0;
+
+        loop {
+            loop_count += 1;
+            let len = self.buf_reader.read_line(&mut buf)?;
+
+            let buf_trimmed = {
+                let tmp = buf.to_string().clone();
+                tmp.trim().to_string()
+            };
+            println!("sbuf {}", buf);
+            if buf_trimmed.len() == 0 {
+                if !statements.is_empty() {
+                    empty_line_count += 1;
+                }
+                if empty_line_count == 2 || loop_count > 5 {
+                    break Ok(Statement::from_sql(statements.join(" ")));
+                }
+                buf.clear();
+                continue;
+            }
+
+            if !buf_trimmed.starts_with("--") {
+                statements.push(buf_trimmed.clone());
+            }
+
+            buf.clear();
+            empty_line_count = 0;
+        }
+    }
+
+    fn next_line_type(&mut self) -> io::Result<LineType> {
+        let mut buf = String::new();
+        self.buf_reader.read_line(&mut buf)?;
+        self.buf_reader.seek(io::SeekFrom::Current(-(buf.len() as i64)));
+
+        let buf = buf.trim();
+
+        if buf.len() == 0 {
+            return Ok(LineType::Blank);
+        }
+
+        if buf.starts_with("--") {
+            Ok(LineType::Comment)
+        } else {
+            Ok(LineType::Statement)
+        }
+    }
+
+    fn read_comment_block(&mut self) -> io::Result<CommentBlock> {
         let mut buf = String::new();
         let mut comment_block = String::new();
 
-        loop {
-            match self.buf_reader.read_line(&mut buf) {
-                Ok(len) => {
-                    if len == 0 {
-                        return CommentBlock::from_string(comment_block.clone());
-                    }
-
-                    if !buf.starts_with("--") {
-                        return CommentBlock::from_string(comment_block.clone());
-                    } else {
-                        comment_block.push_str(&buf.clone());
-                        buf.clear();
-                    }
-                }
-                Err(_) => return None,
+        let comment = loop {
+            let len = self.buf_reader.read_line(&mut buf)?;
+//            let buf_trimmed = buf;
+//                {
+//                let tmp = buf.to_string().clone();
+//                tmp.trim().to_string()
+//            };
+            if buf.len() == 0 {
+                break CommentBlock::from_string(comment_block.clone());
             }
+
+            if buf.starts_with("--") {
+                comment_block.push_str(&buf.clone());
+            } else {
+                break CommentBlock::from_string(comment_block.clone());
+            }
+
+            buf.clear();
+        };
+
+        if let Some(c) = comment {
+            Ok(c)
+        } else {
+            Err(io::Error::from(io::ErrorKind::InvalidData))
         }
     }
 
@@ -108,7 +210,13 @@ impl<'a> DumpReader<'a> {
 
 type Meta = HashMap<String, String>;
 
-#[derive(Debug)]
+enum LineType {
+    Blank,
+    Comment,
+    Statement,
+}
+
+#[derive(Debug, Clone, Default)]
 struct CommentBlock {
     entry_id: Option<u32>,
     meta: Option<Meta>,
@@ -116,7 +224,10 @@ struct CommentBlock {
 
 impl CommentBlock {
     pub fn from_string(s: String) -> Option<Self> {
-        Self::parse_toc(s)
+        match Self::parse_toc(s) {
+            Some(c) => Some(c),
+            None => Some(Default::default()),
+        }
     }
 
     pub fn is_toc(&self) -> bool {
@@ -217,4 +328,72 @@ impl<'a> Parser<'a> {
     }
 }
 
-struct Statements {}
+#[derive(Debug, Clone)]
+enum StatementType {
+    Acl,
+    Comment,
+    Constraint,
+    Extension,
+    FkConstraint,
+    Function,
+    Index,
+    Table,
+    TableData,
+    Unknown,
+}
+
+impl FromStr for StatementType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ACL" => Ok(StatementType::Acl),
+            "COMMENT" => Ok(StatementType::Comment),
+            "CONSTRAINT" => Ok(StatementType::Constraint),
+            "EXTENSION" => Ok(StatementType::Extension),
+            "FK CONSTRAINT" => Ok(StatementType::FkConstraint),
+            "FUNCTION" => Ok(StatementType::Function),
+            "INDEX" => Ok(StatementType::Index),
+            "TABLE" => Ok(StatementType::Table),
+            "TABLE DATA" => Ok(StatementType::TableData),
+            _ => Ok(StatementType::Acl),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Toc {
+    entry_id: u32,
+    name: String,
+    ty: StatementType,
+}
+
+#[derive(Debug, Clone)]
+struct Statement {
+    sql: String,
+    toc: Option<Toc>,
+}
+
+impl Statement {
+    pub fn from_sql(sql: String) -> Self {
+        Self { sql, toc: None }
+    }
+
+    fn set_toc_from_comment(&mut self, comment: CommentBlock) {
+        if !comment.is_toc() {
+            panic!("Cannot set TOC from non-TOC comment");
+        }
+        let meta = comment.meta.unwrap();
+        let name = &meta["Name"];
+        let ty = meta["Type"].parse::<StatementType>();
+        if let Err(e) = ty {
+            panic!("Unable to parse StatementType: {}", e);
+        }
+
+        self.toc = Some(Toc {
+            entry_id: comment.entry_id.unwrap(),
+            name: name.clone(),
+            ty: ty.unwrap(),
+        });
+    }
+}
