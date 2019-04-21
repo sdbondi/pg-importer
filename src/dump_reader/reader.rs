@@ -132,58 +132,11 @@ impl<'a> DumpReader<'a> {
                 // Read until ends with semi
                 if let Some(s) = self.read_until_ends_semi() {
                     statement = Some(Statement::new(s, initial_line_count, initial_pos, self.pos));
-                    //                        let buf_trimmed = {
-                    //                            let tmp = buf.to_string().clone();
-                    //                            tmp.trim().to_string()
-                    //                        };
                 }
             }
         }
 
         statement.ok_or(io::Error::from(io::ErrorKind::UnexpectedEof))
-
-        //        let buf_trimmed = {
-        //            let tmp = buf.to_string().clone();
-        //            tmp.trim().to_string()
-        //        };
-        //        is_in_copy = loop_count == 1 && buf_trimmed.starts_with("COPY");
-        //
-        //        if buf_trimmed.len() == 0 {
-        //            if !statements.is_empty() {
-        //                empty_line_count += 1;
-        //            }
-        //            if empty_line_count == 2 {
-        //                break Ok(Statement::new(
-        //                    statements.join(""),
-        //                    initial_line,
-        //                    initial_pos,
-        //                    self.pos,
-        //                ));
-        //            }
-        //            buf.clear();
-        //            continue;
-        //        }
-        //
-        //        if buf_trimmed.starts_with("--") {
-        //            let mut buf = String::new();
-        //            self.peek_line(&mut buf)?;
-        //            if buf.contains("-- TOC") {
-        //                break Ok(Statement::new(
-        //                    statements.join(""),
-        //                    initial_line,
-        //                    initial_pos,
-        //                    self.pos,
-        //                ));
-        //            }
-        //            continue;
-        //        } else {
-        //            if !buf_trimmed.is_empty() {
-        //                statements.push(buf.clone());
-        //            }
-        //        }
-        //
-        //        buf.clear();
-        //        empty_line_count = 0;
     }
 
     fn next_line_type(&mut self) -> io::Result<LineType> {
