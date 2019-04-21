@@ -1,15 +1,14 @@
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
 use super::comment::CommentBlock;
 
 #[derive(Debug, Clone)]
 pub struct Toc {}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Statement {
-    pub pos_start: usize,
-    pub pos_end: usize,
-    pub line: usize,
+    pub pos: Option<(usize, usize)>,
+    pub line: Option<usize>,
     pub sql: String,
     pub entry_id: Option<u32>,
     pub name: Option<String>,
@@ -20,9 +19,30 @@ impl Statement {
     pub fn new(sql: String, line: usize, pos_start: usize, pos_end: usize) -> Self {
         Self {
             sql,
-            line,
-            pos_start,
-            pos_end,
+            line: Some(line),
+            pos: Some((pos_start, pos_end)),
+            entry_id: None,
+            name: None,
+            ty: StatementType::Unknown,
+        }
+    }
+
+    pub fn from_command(s: String) -> Self {
+        Self {
+            sql: s,
+            line: None,
+            pos: None,
+            entry_id: None,
+            name: None,
+            ty: StatementType::Command,
+        }
+    }
+
+    pub fn from_sql(sql: String) -> Self {
+        Self {
+            sql,
+            line: None,
+            pos: None,
             entry_id: None,
             name: None,
             ty: StatementType::Unknown,
@@ -50,6 +70,22 @@ impl Statement {
     }
 }
 
+impl fmt::Display for Statement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.entry_id.is_some() {
+            write!(
+                f,
+                "Entry: {}, Name: {}, Type: {}",
+                self.entry_id.unwrap(),
+                self.name.clone().unwrap_or("--".to_string()),
+                self.ty
+            )
+        } else {
+            write!(f, "Type: {}", self.ty)
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum StatementType {
     Acl,
@@ -61,6 +97,7 @@ pub enum StatementType {
     Index,
     Table,
     TableData,
+    Command,
     Unknown,
 }
 
@@ -80,5 +117,22 @@ impl FromStr for StatementType {
             "TABLE DATA" => Ok(StatementType::TableData),
             _ => Ok(StatementType::Unknown),
         }
+    }
+}
+
+impl fmt::Display for StatementType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = match *self {
+            StatementType::Acl => "ACL",
+            StatementType::Comment => "COMMENT",
+            StatementType::Extension => "EXTENSION",
+            StatementType::FkConstraint => "FK CONSTRAINT",
+            StatementType::Function => "FUNCTION",
+            StatementType::Index => "INDEX",
+            StatementType::Table => "TABLE",
+            StatementType::TableData => "TABLE DATA",
+            _ => "Unknown",
+        };
+        write!(f, "{}", s)
     }
 }

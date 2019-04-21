@@ -1,4 +1,4 @@
-#[allow(unreachable)]
+#[allow(unreachable_code)]
 use std::process;
 
 use clap::{App, Arg, SubCommand};
@@ -14,10 +14,10 @@ pub fn run_cli() {
                 .about("Import the database from the given dump")
                 .arg(
                     Arg::with_name("connection")
-                        .required(true)
+                        .required(false)
                         .short("c")
                         .takes_value(true)
-                        .help("Postgres connection string"),
+                        .help("Destination postgres connection string"),
                 )
                 .arg(
                     Arg::with_name("dump-file")
@@ -30,7 +30,7 @@ pub fn run_cli() {
                     Arg::with_name("out-file")
                         .short("o")
                         .takes_value(true)
-                        .required(false)
+                        .required(true)
                         .help("Output dump file"),
                 ),
         )
@@ -41,12 +41,10 @@ pub fn run_cli() {
         ("", _) => {
             eprintln!("Missing subcommand");
             process::exit(1);
-            unreachable!();
         }
         _ => {
             eprintln!("Invalid subcommand '{}'", matches.subcommand().0);
             process::exit(1);
-            unreachable!();
         }
     };
 

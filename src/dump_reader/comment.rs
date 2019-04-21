@@ -27,7 +27,7 @@ impl CommentBlock {
             if s.starts_with("-- TOC") {
                 toc_str = Some(s.to_owned());
             }
-            if s.starts_with("-- Name:") {
+            if s.starts_with("-- Name:") || s.starts_with("-- Data for Name:") {
                 meta_str = Some(s.to_owned());
             }
         }
@@ -43,7 +43,10 @@ impl CommentBlock {
     }
 
     fn parse_toc_meta_str(meta_str: String) -> Option<Meta> {
-        let meta_str = &meta_str[2..meta_str.len()];
+        let mut meta_str = meta_str[2..meta_str.len()].trim();
+        if meta_str.starts_with("Data for") {
+            meta_str = &meta_str[9..meta_str.len()];
+        }
         let mut meta = HashMap::new();
         for part in meta_str.split(';') {
             let v = part.splitn(2, ':').collect::<Vec<&str>>();

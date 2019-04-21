@@ -1,17 +1,18 @@
 use std::{
-    fs::{self, File},
+    fs::File,
     io::Seek,
-    io::SeekFrom,
     io::{self, BufRead},
-    path::Path,
 };
 
-use super::{comment::CommentBlock, statement::Statement};
+use super::{comment::CommentBlock, statement::Statement, statement::StatementType};
+use clap::SubCommand;
 
+#[derive(Debug)]
 enum LineType {
     Blank,
     Comment,
     Statement,
+    Command,
 }
 
 pub struct DumpReader<'a> {
@@ -35,23 +36,15 @@ impl<'a> DumpReader<'a> {
         let mut blank_count = 0;
         loop {
             if let Ok(line) = self.next_line_type() {
-                if last_toc_comment.is_some() {
-                    let mut statement = self.read_statement()?;
-
-                    statement.set_toc_from_comment(last_toc_comment.unwrap());
-                    statements.push(statement.clone());
-                    last_toc_comment = None;
-                    continue;
-                }
-
                 match line {
                     LineType::Blank => {
                         blank_count += 1;
                         if blank_count > 10 {
+                            self.line_count -= blank_count;
                             break Ok(statements);
                         }
                         let mut dummy_buf = String::new();
-                        self.read_line(&mut dummy_buf);
+                        self.read_line(&mut dummy_buf)?;
                         continue;
                     }
                     LineType::Comment => {
@@ -74,9 +67,29 @@ impl<'a> DumpReader<'a> {
                         }
                     }
                     LineType::Statement => {
+                        if let Some(comment) = last_toc_comment {
+                            let meta = comment.meta.clone();
+                            let statement_type =
+                                meta.unwrap()["Type"].parse::<StatementType>().ok();
+                            let mut statement = self.read_statement(statement_type)?;
+
+                            statement.set_toc_from_comment(comment);
+                            println!("Read statement: {}", statement);
+                            statements.push(statement.clone());
+                        } else {
+                            let statement = self.read_statement(None)?;
+                            statements.push(statement.clone());
+                        }
+
                         blank_count = 0;
-                        let statement = self.read_statement()?;
-                        statements.push(statement.clone());
+                        last_toc_comment = None;
+                    }
+                    LineType::Command => {
+                        let mut buf = String::new();
+                        self.read_line(&mut buf)?;
+                        statements.push(Statement::from_command(buf));
+
+                        blank_count = 0;
                         last_toc_comment = None;
                     }
                 }
@@ -86,46 +99,91 @@ impl<'a> DumpReader<'a> {
         }
     }
 
-    fn read_statement(&mut self) -> io::Result<Statement> {
+    fn read_statement(&mut self, ty: Option<StatementType>) -> io::Result<Statement> {
         let mut buf = String::new();
-        let mut statements = Vec::new();
         let mut empty_line_count = 0;
         let mut loop_count = 0;
 
         let initial_pos = self.pos;
-        let initial_line = self.line_count;
-
-        loop {
-            loop_count += 1;
-            let len = self.read_line(&mut buf)?;
-
-            let buf_trimmed = {
-                let tmp = buf.to_string().clone();
-                tmp.trim().to_string()
-            };
-            if buf_trimmed.len() == 0 {
-                if !statements.is_empty() {
-                    empty_line_count += 1;
+        let initial_line_count = self.line_count;
+        let mut statement = None;
+        match ty {
+            Some(ref statement_type) => match statement_type {
+                StatementType::TableData => {
+                    if let Some(s) = self.read_until("\\.") {
+                        statement =
+                            Some(Statement::new(s, initial_line_count, initial_pos, self.pos));
+                    }
                 }
-                if empty_line_count == 2 || loop_count > 5 {
-                    break Ok(Statement::new(
-                        statements.join(" "),
-                        initial_line,
-                        initial_pos,
-                        self.pos,
-                    ));
+                StatementType::Function => {
+                    if let Some(s) = self.read_until_eofunc() {
+                        statement =
+                            Some(Statement::new(s, initial_line_count, initial_pos, self.pos));
+                    }
                 }
-                buf.clear();
-                continue;
+                _ => {
+                    if let Some(s) = self.read_until_double_empty_lines() {
+                        statement =
+                            Some(Statement::new(s, initial_line_count, initial_pos, self.pos));
+                    }
+                }
+            },
+            None => {
+                // Read until ends with semi
+                if let Some(s) = self.read_until_ends_semi() {
+                    statement = Some(Statement::new(s, initial_line_count, initial_pos, self.pos));
+                    //                        let buf_trimmed = {
+                    //                            let tmp = buf.to_string().clone();
+                    //                            tmp.trim().to_string()
+                    //                        };
+                }
             }
-
-            if !buf_trimmed.starts_with("--") {
-                statements.push(buf_trimmed.clone());
-            }
-
-            buf.clear();
-            empty_line_count = 0;
         }
+
+        statement.ok_or(io::Error::from(io::ErrorKind::UnexpectedEof))
+
+        //        let buf_trimmed = {
+        //            let tmp = buf.to_string().clone();
+        //            tmp.trim().to_string()
+        //        };
+        //        is_in_copy = loop_count == 1 && buf_trimmed.starts_with("COPY");
+        //
+        //        if buf_trimmed.len() == 0 {
+        //            if !statements.is_empty() {
+        //                empty_line_count += 1;
+        //            }
+        //            if empty_line_count == 2 {
+        //                break Ok(Statement::new(
+        //                    statements.join(""),
+        //                    initial_line,
+        //                    initial_pos,
+        //                    self.pos,
+        //                ));
+        //            }
+        //            buf.clear();
+        //            continue;
+        //        }
+        //
+        //        if buf_trimmed.starts_with("--") {
+        //            let mut buf = String::new();
+        //            self.peek_line(&mut buf)?;
+        //            if buf.contains("-- TOC") {
+        //                break Ok(Statement::new(
+        //                    statements.join(""),
+        //                    initial_line,
+        //                    initial_pos,
+        //                    self.pos,
+        //                ));
+        //            }
+        //            continue;
+        //        } else {
+        //            if !buf_trimmed.is_empty() {
+        //                statements.push(buf.clone());
+        //            }
+        //        }
+        //
+        //        buf.clear();
+        //        empty_line_count = 0;
     }
 
     fn next_line_type(&mut self) -> io::Result<LineType> {
@@ -140,6 +198,8 @@ impl<'a> DumpReader<'a> {
 
         if buf.starts_with("--") {
             Ok(LineType::Comment)
+        } else if buf.starts_with("\\") {
+            Ok(LineType::Command)
         } else {
             Ok(LineType::Statement)
         }
@@ -150,12 +210,7 @@ impl<'a> DumpReader<'a> {
         let mut comment_block = String::new();
 
         let comment = loop {
-            let len = self.read_line(&mut buf)?;
-            //            let buf_trimmed = buf;
-            //                {
-            //                let tmp = buf.to_string().clone();
-            //                tmp.trim().to_string()
-            //            };
+            self.read_line(&mut buf)?;
             if buf.len() == 0 {
                 break CommentBlock::from_string(comment_block.clone());
             }
@@ -176,17 +231,90 @@ impl<'a> DumpReader<'a> {
         }
     }
 
-    fn read_until_comment(&mut self) -> Option<String> {
+    fn read_until_eofunc(&mut self) -> Option<String> {
         let mut buf = String::new();
+        let mut contents = String::new();
         loop {
             match self.read_line(&mut buf) {
-                Ok(len) => {
-                    if len > 0 {
-                        if buf.starts_with("--") {
-                            return Some(buf.clone());
-                        } else {
-                            buf.clear();
-                        }
+                Ok(_) => {
+                    contents.push_str(&buf);
+                    let buf_trimmed = {
+                        let tmp = buf.to_string().clone();
+                        tmp.trim().to_string()
+                    };
+                    if buf_trimmed == "END $_$;" || buf_trimmed == "$_$;" || buf_trimmed == "$$;" {
+                        return Some(contents);
+                    } else {
+                        buf.clear();
+                    }
+                }
+                Err(_) => return None,
+            }
+        }
+        None
+    }
+
+    fn read_until(&mut self, pat: &str) -> Option<String> {
+        let mut buf = String::new();
+        let mut contents = String::new();
+        loop {
+            match self.read_line(&mut buf) {
+                Ok(_) => {
+                    contents.push_str(&buf);
+                    if buf.starts_with(pat) {
+                        return Some(contents.clone());
+                    } else {
+                        buf.clear();
+                    }
+                }
+                Err(_) => return None,
+            }
+        }
+    }
+
+    fn read_until_double_empty_lines(&mut self) -> Option<String> {
+        let mut buf = String::new();
+        let mut empty_line_count = 0;
+        let mut contents = String::new();
+        loop {
+            match self.read_line(&mut buf) {
+                Ok(_) => {
+                    contents.push_str(&buf);
+                    let buf_trimmed = {
+                        let tmp = buf.to_string().clone();
+                        tmp.trim().to_string()
+                    };
+
+                    if buf_trimmed.len() == 0 {
+                        empty_line_count += 1;
+                    }
+
+                    if empty_line_count == 2 {
+                        return Some(contents.clone());
+                    }
+                    buf.clear();
+                }
+                Err(_) => return None,
+            }
+        }
+    }
+
+    fn read_until_ends_semi(&mut self) -> Option<String> {
+        let mut buf = String::new();
+        let mut contents = String::new();
+        loop {
+            match self.read_line(&mut buf) {
+                Ok(_) => {
+                    contents.push_str(&buf);
+                    let buf_trimmed = {
+                        let tmp = buf.to_string().clone();
+                        tmp.trim().to_string()
+                    };
+
+                    if buf_trimmed.ends_with(';') {
+                        return Some(contents.clone());
+                    } else {
+                        buf.clear();
                     }
                 }
                 Err(_) => return None,
@@ -197,7 +325,7 @@ impl<'a> DumpReader<'a> {
     fn peek_line(&mut self, buf: &mut String) -> io::Result<usize> {
         let size = self.buf_reader.read_line(buf)?;
         self.buf_reader
-            .seek(io::SeekFrom::Current(-(buf.len() as i64)));
+            .seek(io::SeekFrom::Current(-(buf.len() as i64)))?;
         Ok(size)
     }
 
