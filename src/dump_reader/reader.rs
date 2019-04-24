@@ -5,7 +5,6 @@ use std::{
 };
 
 use super::{comment::CommentBlock, statement::Statement, statement::StatementType};
-use clap::SubCommand;
 
 #[derive(Debug)]
 enum LineType {
@@ -73,7 +72,7 @@ impl<'a> DumpReader<'a> {
                                 meta.unwrap()["Type"].parse::<StatementType>().ok();
                             let mut statement = self.read_statement(statement_type)?;
 
-                            statement.set_toc_from_comment(comment);
+                            statement.set_from_comment_block(comment);
                             println!("Read statement: {}", statement);
                             statements.push(statement.clone());
                         } else {
@@ -100,10 +99,6 @@ impl<'a> DumpReader<'a> {
     }
 
     fn read_statement(&mut self, ty: Option<StatementType>) -> io::Result<Statement> {
-        let mut buf = String::new();
-        let mut empty_line_count = 0;
-        let mut loop_count = 0;
-
         let initial_pos = self.pos;
         let initial_line_count = self.line_count;
         let mut statement = None;
@@ -204,7 +199,6 @@ impl<'a> DumpReader<'a> {
                 Err(_) => return None,
             }
         }
-        None
     }
 
     fn read_until(&mut self, pat: &str) -> Option<String> {

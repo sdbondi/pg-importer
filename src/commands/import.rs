@@ -28,13 +28,13 @@ pub fn handler(matches: &ArgMatches) -> HandlerResult {
         "SELECT pg_catalog.set_config('search_path', 'public', false);",
     );
 
-        println!("Writing output dump file {}...", out_file);
-        let mut f = File::create(Path::new(out_file)).map_err(|_| AppError::CannotWriteToOutfile)?;
+    println!("Writing output dump file {}...", out_file);
+    let mut f = File::create(Path::new(out_file)).map_err(|_| AppError::CannotWriteToOutfile)?;
 
-        for s in statements.iter() {
-            f.write(format!("-- {}\n\n{}\n\n\n", s, s.sql).as_bytes())
-                .unwrap();
-        }
+    for s in statements.iter() {
+        f.write(format!("-- {}\n\n{}\n\n\n", s, s.sql).as_bytes())
+            .unwrap();
+    }
 
     if let Some(conn_str) = connection_string {
         let mut conn = Connection::connect(conn_str, TlsMode::None).unwrap();
@@ -45,8 +45,7 @@ pub fn handler(matches: &ArgMatches) -> HandlerResult {
                     let db = &db[1..db.len() - 2];
                     println!("Connecting to db {}", db);
                     conn =
-                        Connection::connect(format!("{}/{}", conn_str, db), TlsMode::None)
-                            .unwrap();
+                        Connection::connect(format!("{}/{}", conn_str, db), TlsMode::None).unwrap();
                 } else {
                     println!("WARNING: skipping psql command {}", s.sql);
                 }
@@ -56,7 +55,7 @@ pub fn handler(matches: &ArgMatches) -> HandlerResult {
             println!(
                 "Executing line {} [{}...]",
                 s.line.unwrap_or(0),
-                &s.sql //[0..min(nl_idx.unwrap_or(100), s.sql.len())]
+                &s.sql[0..min(nl_idx.unwrap_or(100), s.sql.len())]
             );
 
             match conn.batch_execute(&s.sql) {

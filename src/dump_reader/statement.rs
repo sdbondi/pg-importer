@@ -49,7 +49,7 @@ impl Statement {
         }
     }
 
-    pub(super) fn set_toc_from_comment(&mut self, comment: CommentBlock) {
+    pub(super) fn set_from_comment_block(&mut self, comment: CommentBlock) {
         if !comment.is_toc() {
             panic!("Cannot set TOC from non-TOC comment");
         }
