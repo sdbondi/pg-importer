@@ -1,10 +1,7 @@
+use crate::commands;
+use clap::{App, Arg, SubCommand};
 #[allow(unreachable_code)]
 use std::process;
-
-use clap::{App, Arg, SubCommand};
-
-use crate::commands;
-use crate::types::HandlerResult;
 
 pub fn run_cli() {
     let matches = App::new("DB importer")
@@ -32,12 +29,41 @@ pub fn run_cli() {
                         .takes_value(true)
                         .required(true)
                         .help("Output dump file"),
+                )
+                .arg(
+                    Arg::with_name("exclude-schema")
+                        .short("x")
+                        .long("exclude-schema")
+                        .takes_value(true)
+                        .help("Exclude a schema"),
+                )
+                .arg(
+                    Arg::with_name("exclude-extension")
+                        .long("exclude-extension")
+                        .takes_value(true)
+                        .help("Exclude an extension"),
+                )
+                .arg(
+                    Arg::with_name("exclude-tabledata")
+                        .long("exclude-tabledata")
+                        .takes_value(true)
+                        .help("Exclude an tabledata"),
                 ),
+        )
+        .subcommand(
+            SubCommand::with_name("read").arg(
+                Arg::with_name("dump-file")
+                    .short("f")
+                    .takes_value(true)
+                    .required(true)
+                    .help("SQL DB dump file"),
+            ),
         )
         .get_matches();
 
-    let result: HandlerResult = match matches.subcommand() {
+    let result = match matches.subcommand() {
         ("import", Some(matches)) => commands::import::handler(matches),
+        ("read", Some(matches)) => commands::read::handler(matches),
         ("", _) => {
             eprintln!("Missing subcommand");
             process::exit(1);

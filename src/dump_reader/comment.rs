@@ -1,65 +1,90 @@
-use std::collections::HashMap;
+use crate::dump_reader::StatementType;
+use std::fmt::{Display, Formatter};
+use std::str::FromStr;
+use std::{fmt, io};
 
-pub type Meta = HashMap<String, String>;
+#[derive(Debug, Clone, Default)]
+pub struct Meta {
+    pub name: String,
+    pub ty: StatementType,
+    pub schema: String,
+    pub owner: String,
+}
+
+impl Display for Meta {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Name: {}; Type: {}; Schema: {}, Owner: {}",
+            self.name, self.ty, self.schema, self.owner
+        )
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct CommentBlock {
     pub entry_id: Option<u32>,
-    pub meta: Option<Meta>,
+    pub meta: Meta,
+    pub lineno: usize,
+}
+
+impl FromStr for CommentBlock {
+    type Err = io::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse_toc(s).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "Unable to parse comment block")
+        })
+    }
 }
 
 impl CommentBlock {
-    pub fn from_string(s: String) -> Option<Self> {
-        match Self::parse_toc(s) {
-            Some(c) => Some(c),
-            None => Some(Default::default()),
-        }
-    }
-
-    pub fn is_toc(&self) -> bool {
-        self.entry_id.is_some()
-    }
-
-    fn parse_toc(lines: String) -> Option<Self> {
-        let mut toc_str = None;
-        let mut meta_str = None;
+    fn parse_toc(lines: &str) -> Option<Self> {
+        let mut comment = Self::default();
         for s in lines.split('\n') {
             if s.starts_with("-- TOC") {
-                toc_str = Some(s.to_owned());
+                comment.entry_id = Some(Self::parse_toc_entry_id(s)?);
             }
             if s.starts_with("-- Name:") || s.starts_with("-- Data for Name:") {
-                meta_str = Some(s.to_owned());
+                comment.meta = Self::parse_toc_meta_str(s)?;
             }
         }
 
-        if toc_str.is_none() || meta_str.is_none() {
-            None
-        } else {
-            Some(CommentBlock {
-                entry_id: Self::parse_toc_entry_id(toc_str.unwrap()),
-                meta: Self::parse_toc_meta_str(meta_str.unwrap()),
-            })
-        }
+        Some(comment)
     }
 
-    fn parse_toc_meta_str(meta_str: String) -> Option<Meta> {
+    fn parse_toc_meta_str(meta_str: &str) -> Option<Meta> {
         let mut meta_str = meta_str[2..meta_str.len()].trim();
         if meta_str.starts_with("Data for") {
             meta_str = &meta_str[9..meta_str.len()];
         }
-        let mut meta = HashMap::new();
+        let mut meta = Meta::default();
         for part in meta_str.split(';') {
-            let v = part.splitn(2, ':').collect::<Vec<&str>>();
-            if v.len() != 2 {
-                return None;
+            let mut iter = part.splitn(2, ':');
+
+            let k = iter.next()?.trim();
+            let v = iter.next()?.trim();
+            match k {
+                "Name" => {
+                    meta.name = v.to_string();
+                }
+                "Type" => {
+                    meta.ty = v.parse().ok()?;
+                }
+                "schema" => {
+                    meta.schema = v.to_string();
+                }
+                "owner" => {
+                    meta.owner = v.to_string();
+                }
+                _ => {}
             }
-            meta.insert(v[0].trim().to_string(), v[1].trim().to_string());
         }
         Some(meta)
     }
 
-    fn parse_toc_entry_id(toc_str: String) -> Option<u32> {
-        let mut p = Parser::new(toc_str.as_str());
+    fn parse_toc_entry_id(toc_str: &str) -> Option<u32> {
+        let mut p = Parser::new(toc_str);
         p.read_token("--");
         p.read_token("TOC");
         p.read_token("entry");
@@ -117,5 +142,20 @@ impl<'a> Parser<'a> {
             self.pos = pos;
             Some(number)
         }
+    }
+}
+
+impl Display for CommentBlock {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Line#: {}, ID: {}, Meta({})",
+            self.lineno,
+            self.entry_id
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "--".to_string()),
+            self.meta
+        )
     }
 }

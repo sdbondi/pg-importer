@@ -6,4 +6,4 @@ pub enum AppError {
     CannotWriteToOutfile,
 }
 
-pub type HandlerResult = Result<(), AppError>;
+pub type CommandResult<T> = Result<T, AppError>;

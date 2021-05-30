@@ -5,6 +5,7 @@ use std::{
 };
 
 use super::{comment::CommentBlock, statement::Statement, statement::StatementType};
+use std::str::FromStr;
 
 #[derive(Debug)]
 enum LineType {
@@ -18,14 +19,23 @@ pub struct DumpReader<'a> {
     buf_reader: io::BufReader<&'a File>,
     pos: usize,
     line_count: usize,
+    config: Config,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Config {
+    pub exclude_schema: Vec<String>,
+    pub exclude_extension: Vec<String>,
+    pub exclude_table_data: Vec<String>,
 }
 
 impl<'a> DumpReader<'a> {
-    pub fn from_file(file: &'a File) -> Self {
+    pub fn new(file: &'a File, config: Config) -> Self {
         Self {
             buf_reader: io::BufReader::new(file),
             pos: 0,
             line_count: 0,
+            config,
         }
     }
 
@@ -50,11 +60,7 @@ impl<'a> DumpReader<'a> {
                         blank_count = 0;
                         match self.read_comment_block() {
                             Ok(c) => {
-                                if c.is_toc() {
-                                    last_toc_comment = Some(c.clone());
-                                } else {
-                                    last_toc_comment = None;
-                                }
+                                last_toc_comment = Some(c);
                             }
                             Err(e) => {
                                 if e.kind() == io::ErrorKind::UnexpectedEof {
@@ -67,14 +73,29 @@ impl<'a> DumpReader<'a> {
                     }
                     LineType::Statement => {
                         if let Some(comment) = last_toc_comment {
-                            let meta = comment.meta.clone();
-                            let statement_type =
-                                meta.unwrap()["Type"].parse::<StatementType>().ok();
-                            let mut statement = self.read_statement(statement_type)?;
+                            let mut exclude = false;
+                            // 🤏🍝
+                            if self.config.exclude_schema.contains(&comment.meta.schema) {
+                                println!("Skipping schema {}", comment);
+                                exclude = true;
+                            } else if comment.meta.ty == StatementType::Extension
+                                && self.config.exclude_extension.contains(&comment.meta.name)
+                            {
+                                println!("Skipping extension {}", comment);
+                                exclude = true;
+                            } else if comment.meta.ty == StatementType::TableData
+                                && self.config.exclude_table_data.contains(&comment.meta.name)
+                            {
+                                println!("Skipping table data {}", comment);
+                                exclude = true;
+                            }
 
-                            statement.set_from_comment_block(comment);
-                            println!("Read statement: {}", statement);
-                            statements.push(statement.clone());
+                            let mut statement = self.read_statement(Some(comment.meta.ty))?;
+                            if !exclude {
+                                statement.set_from_comment_block(comment);
+                                println!("- {}", statement);
+                                statements.push(statement.clone());
+                            }
                         } else {
                             let statement = self.read_statement(None)?;
                             statements.push(statement.clone());
@@ -98,12 +119,12 @@ impl<'a> DumpReader<'a> {
         }
     }
 
-    fn read_statement(&mut self, ty: Option<StatementType>) -> io::Result<Statement> {
+    fn read_statement(&mut self, statement_type: Option<StatementType>) -> io::Result<Statement> {
         let initial_pos = self.pos;
         let initial_line_count = self.line_count;
         let mut statement = None;
-        match ty {
-            Some(ref statement_type) => match statement_type {
+        match statement_type {
+            Some(statement_type) => match statement_type {
                 StatementType::TableData => {
                     if let Some(s) = self.read_until("\\.") {
                         statement =
@@ -117,7 +138,7 @@ impl<'a> DumpReader<'a> {
                     }
                 }
                 _ => {
-                    if let Some(s) = self.read_until_double_empty_lines() {
+                    if let Some(s) = self.read_until_n_empty_lines(1) {
                         statement =
                             Some(Statement::new(s, initial_line_count, initial_pos, self.pos));
                     }
@@ -157,26 +178,24 @@ impl<'a> DumpReader<'a> {
         let mut buf = String::new();
         let mut comment_block = String::new();
 
-        let comment = loop {
+        let comment_str = loop {
             self.read_line(&mut buf)?;
             if buf.len() == 0 {
-                break CommentBlock::from_string(comment_block.clone());
+                break comment_block;
             }
 
             if buf.starts_with("--") {
                 comment_block.push_str(&buf.clone());
             } else {
-                break CommentBlock::from_string(comment_block.clone());
+                break comment_block;
             }
 
             buf.clear();
         };
 
-        if let Some(c) = comment {
-            Ok(c)
-        } else {
-            Err(io::Error::from(io::ErrorKind::InvalidData))
-        }
+        let mut comment_block = CommentBlock::from_str(&comment_str)?;
+        comment_block.lineno = self.line_count;
+        Ok(comment_block)
     }
 
     fn read_until_eofunc(&mut self) -> Option<String> {
@@ -219,7 +238,7 @@ impl<'a> DumpReader<'a> {
         }
     }
 
-    fn read_until_double_empty_lines(&mut self) -> Option<String> {
+    fn read_until_n_empty_lines(&mut self, n: usize) -> Option<String> {
         let mut buf = String::new();
         let mut empty_line_count = 0;
         let mut contents = String::new();
@@ -236,7 +255,7 @@ impl<'a> DumpReader<'a> {
                         empty_line_count += 1;
                     }
 
-                    if empty_line_count == 2 {
+                    if empty_line_count == n {
                         return Some(contents.clone());
                     }
                     buf.clear();

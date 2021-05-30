@@ -50,19 +50,9 @@ impl Statement {
     }
 
     pub(super) fn set_from_comment_block(&mut self, comment: CommentBlock) {
-        if !comment.is_toc() {
-            panic!("Cannot set TOC from non-TOC comment");
-        }
-        let meta = comment.meta.unwrap();
-        let name = &meta["Name"];
-        let ty = meta["Type"].parse::<StatementType>();
-        if let Err(e) = ty {
-            panic!("Unable to parse StatementType: {}", e);
-        }
-
-        self.entry_id = Some(comment.entry_id.unwrap());
-        self.name = Some(name.clone());
-        self.ty = ty.unwrap();
+        self.entry_id = comment.entry_id;
+        self.name = Some(comment.meta.name);
+        self.ty = comment.meta.ty;
     }
 
     pub fn set_sql(&mut self, sql: String) {
@@ -72,21 +62,18 @@ impl Statement {
 
 impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.entry_id.is_some() {
-            write!(
-                f,
-                "Entry: {}, Name: {}, Type: {}",
-                self.entry_id.unwrap(),
-                self.name.clone().unwrap_or("--".to_string()),
-                self.ty
-            )
-        } else {
-            write!(f, "Type: {}", self.ty)
-        }
+        write!(
+            f,
+            "Line: {}, Entry: {}, Name: {}, Type: {}",
+            self.line.unwrap_or_default(),
+            self.entry_id.unwrap_or_default(),
+            self.name.as_ref().map(|s| s.as_str()).unwrap_or("--"),
+            self.ty
+        )
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum StatementType {
     Acl,
     Comment,
@@ -99,6 +86,12 @@ pub enum StatementType {
     TableData,
     Command,
     Unknown,
+}
+
+impl Default for StatementType {
+    fn default() -> Self {
+        StatementType::Unknown
+    }
 }
 
 impl FromStr for StatementType {

@@ -1,22 +1,39 @@
+use crate::dump_reader::{reader, StatementType};
+use crate::{
+    dump_reader::{DumpReader, Statements},
+    types::{AppError, CommandResult},
+};
 use clap::ArgMatches;
 use postgres::{Connection, TlsMode};
 use std::{cmp::min, fs::File, io::Write, path::Path};
 
-use crate::dump_reader::StatementType;
-use crate::{
-    dump_reader::{DumpReader, Statements},
-    types::{AppError, HandlerResult},
-};
-
-pub fn handler(matches: &ArgMatches) -> HandlerResult {
+pub fn handler(matches: &ArgMatches) -> CommandResult<()> {
     let connection_string = matches.value_of("connection");
     let dump_file = matches.value_of("dump-file").unwrap();
     let out_file = matches.value_of("out-file").unwrap();
+    let exclude_schema = matches.value_of("exclude-schema");
+    let exclude_extension = matches.value_of("exclude-extension");
+    let exclude_table_data = matches.value_of("exclude-tabledata");
 
     let in_file = File::open(Path::new(dump_file)).map_err(|_| AppError::CannotOpenDumpFile)?;
 
     println!("Parsing dump file {}...", dump_file);
-    let statements = DumpReader::from_file(&in_file).read().unwrap();
+    let statements = DumpReader::new(
+        &in_file,
+        reader::Config {
+            exclude_schema: exclude_schema
+                .map(|s| s.split(",").map(ToString::to_string).collect())
+                .unwrap_or_default(),
+            exclude_extension: exclude_extension
+                .map(|s| s.split(",").map(ToString::to_string).collect())
+                .unwrap_or_default(),
+            exclude_table_data: exclude_table_data
+                .map(|s| s.split(",").map(ToString::to_string).collect())
+                .unwrap_or_default(),
+        },
+    )
+    .read()
+    .unwrap();
     let mut statements = Statements::wrap(statements);
 
     // Now to fudge things
