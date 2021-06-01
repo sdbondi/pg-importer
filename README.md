@@ -11,4 +11,4 @@ psql < output_dump_file.sql
 ```
 
 
-NOTE: `--exclude-tabledata` was added because the parser has a bug that I have not had time to dig into - so just skip for now ;)
+NOTE: `--exclude-tabledata=xxxxx` was added because the parser has a bug that I have not had time to dig into - so just skip for now ;)
